@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap');
+
+:root {
+  --bg: #050606;
+  --text: #f7f5ef;
+  --muted: #a8aa9e;
+  --line: rgba(255, 255, 255, 0.12);
+  --gold: #d5a548;
+  --gold-soft: #f2d994;
+  --lime: #b8f24f;
+  --admin-bg: #f4f1e8;
+  --admin-text: #171a18;
+  --admin-gold: #e5bd5c;
+  --shadow-card: 0 22px 58px rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  background: var(--bg);
+  font-family:
+    Poppins,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-synthesis: none;
+  line-height: 1.45;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  letter-spacing: 0;
+}
+
+img,
+svg {
+  display: block;
+}
+
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(184, 242, 79, 0.55);
+  outline-offset: 3px;
+}
+
+#root {
+  min-height: 100svh;
+}
