@@ -350,6 +350,95 @@ function numericId(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
+function emptyProductForm(supplierId = '') {
+  return {
+    name: '',
+    category: 'Camisas',
+    price: '',
+    cost: '',
+    supplierId: supplierId ? String(supplierId) : '',
+    badge: 'Novo',
+    image: productImages.training,
+    description: '',
+    fabric: 'Dry fit',
+    colors: 'Preto',
+    reorderPoint: '10',
+    active: true,
+    launch: true,
+    sizes: SIZES.reduce((grade, size) => ({ ...grade, [size]: size === 'XG' ? '' : '0' }), {}),
+  }
+}
+
+function emptySupplierForm() {
+  return {
+    name: '',
+    category: '',
+    contact: '',
+    phone: '',
+    city: '',
+    leadTime: '7',
+    rating: '4,6',
+    openOrders: '0',
+    status: 'Em avaliacao',
+    active: true,
+  }
+}
+
+function emptyClientForm() {
+  return {
+    name: '',
+    document: '',
+    phone: '',
+    email: '',
+    city: '',
+    uf: '',
+    type: 'Consumidor',
+    notes: '',
+    active: true,
+  }
+}
+
+function emptyOrderItem(product) {
+  return {
+    productId: product?.id ? String(product.id) : '',
+    productName: product?.name || '',
+    size: '',
+    quantity: '1',
+    unitPrice: product?.price ? String(product.price).replace('.', ',') : '',
+  }
+}
+
+function emptyOrderForm(products = []) {
+  return {
+    clientId: '',
+    customerName: '',
+    customerPhone: '',
+    payment: 'Pix',
+    status: 'Recebido',
+    discount: '0',
+    surcharge: '0',
+    notes: 'Venda fechada pelo WhatsApp.',
+    items: [emptyOrderItem(products[0])],
+  }
+}
+
+function colorsFromText(value) {
+  return String(value || '')
+    .split(/[,|]/)
+    .map((color) => color.trim())
+    .filter(Boolean)
+}
+
+function sizesFromForm(sizes) {
+  return SIZES.reduce(
+    (grade, size) => ({
+      ...grade,
+      [size]: Math.max(0, Number(sizes?.[size]) || 0),
+    }),
+    {},
+  )
+}
+
 function productPayload(product) {
   return {
     name: product.name,
@@ -398,6 +487,81 @@ function clientPayload(client) {
   }
 }
 
+function ModalOverlay({ isOpen, onClose, children, title }) {
+  if (!isOpen) return null
+
+  return (
+    <>
+      <div
+        className="modal-overlay"
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}
+      />
+      <div
+        className="modal-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          backgroundColor: '#fff',
+          borderRadius: '8px',
+          boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
+          maxHeight: '90vh',
+          overflow: 'auto',
+          zIndex: 1001,
+          width: '90%',
+          maxWidth: '600px',
+          padding: '24px',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '20px',
+            borderBottom: '1px solid #e0e0e0',
+            paddingBottom: '16px',
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>{title}</h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '24px',
+              cursor: 'pointer',
+              padding: '0',
+              width: '32px',
+              height: '32px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <X size={20} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </>
+  )
+}
+
 function App() {
   const [view, setViewState] = useState(() => (window.location.hash === '#admin' ? 'admin' : 'store'))
   const [products, setProducts] = useState(defaultProducts)
@@ -408,6 +572,11 @@ function App() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false)
   const [cartNotice, setCartNotice] = useState(null)
   const [apiStatus, setApiStatus] = useState({ isLoading: true, isOnline: false, message: '' })
+  const [checkoutStatus, setCheckoutStatus] = useState({ isSaving: false, message: '' })
+  const [showProductModal, setShowProductModal] = useState(false)
+  const [showSupplierModal, setShowSupplierModal] = useState(false)
+  const [showClientModal, setShowClientModal] = useState(false)
+  const [showOrderModal, setShowOrderModal] = useState(false)
   const cartNoticeTimer = useRef(null)
 
   useEffect(() => {
@@ -538,36 +707,45 @@ function App() {
       setProducts((current) => current.map((product) => (product.id === productId ? savedProduct : product)))
     } catch (error) {
       setApiStatus((current) => ({ ...current, message: error.message }))
+      setProducts((current) =>
+        current.map((product) => (product.id === productId ? currentProduct : product)),
+      )
     }
   }
 
   async function addProduct(product) {
     if (!apiStatus.isOnline) {
-      setProducts((current) => [product, ...current])
-      return
+      const message = 'API offline. Ligue o backend para cadastrar produtos no banco.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
 
     try {
       const savedProduct = await api.createProduct(productPayload(product))
       setProducts((current) => [savedProduct, ...current])
+      return { ok: true, product: savedProduct }
     } catch (error) {
-      setApiStatus((current) => ({ ...current, message: error.message }))
-      setProducts((current) => [product, ...current])
+      const message = error.message || 'Nao foi possivel cadastrar o produto.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
   }
 
   async function addSupplier(supplier) {
     if (!apiStatus.isOnline) {
-      setSuppliers((current) => [supplier, ...current])
-      return
+      const message = 'API offline. Ligue o backend para cadastrar fornecedores no banco.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
 
     try {
       const savedSupplier = await api.createSupplier(supplierPayload(supplier))
       setSuppliers((current) => [savedSupplier, ...current])
+      return { ok: true, supplier: savedSupplier }
     } catch (error) {
-      setApiStatus((current) => ({ ...current, message: error.message }))
-      setSuppliers((current) => [supplier, ...current])
+      const message = error.message || 'Nao foi possivel cadastrar o fornecedor.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
   }
 
@@ -587,21 +765,27 @@ function App() {
       setSuppliers((current) => current.map((supplier) => (supplier.id === supplierId ? savedSupplier : supplier)))
     } catch (error) {
       setApiStatus((current) => ({ ...current, message: error.message }))
+      setSuppliers((current) =>
+        current.map((supplier) => (supplier.id === supplierId ? currentSupplier : supplier)),
+      )
     }
   }
 
   async function addClient(client) {
     if (!apiStatus.isOnline) {
-      setClients((current) => [client, ...current])
-      return
+      const message = 'API offline. Ligue o backend para cadastrar clientes no banco.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
 
     try {
       const savedClient = await api.createClient(clientPayload(client))
       setClients((current) => [savedClient, ...current])
+      return { ok: true, client: savedClient }
     } catch (error) {
-      setApiStatus((current) => ({ ...current, message: error.message }))
-      setClients((current) => [client, ...current])
+      const message = error.message || 'Nao foi possivel cadastrar o cliente.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
   }
 
@@ -619,10 +803,12 @@ function App() {
       setClients((current) => current.map((client) => (client.id === clientId ? savedClient : client)))
     } catch (error) {
       setApiStatus((current) => ({ ...current, message: error.message }))
+      setClients((current) => current.map((client) => (client.id === clientId ? currentClient : client)))
     }
   }
 
   async function updateOrder(orderId, patch) {
+    const currentOrder = orders.find((order) => order.id === orderId)
     setOrders((current) => current.map((order) => (order.id === orderId ? { ...order, ...patch } : order)))
 
     if (!apiStatus.isOnline || !patch.status) return
@@ -632,11 +818,48 @@ function App() {
       setOrders((current) => current.map((order) => (order.id === orderId ? savedOrder : order)))
     } catch (error) {
       setApiStatus((current) => ({ ...current, message: error.message }))
+      if (currentOrder) {
+        setOrders((current) => current.map((order) => (order.id === orderId ? currentOrder : order)))
+      }
+    }
+  }
+
+  async function addOrder(order) {
+    if (!apiStatus.isOnline) {
+      const message = 'API offline. Ligue o backend para registrar pedidos no banco.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
+    }
+
+    try {
+      const savedOrder = await api.finalizeOrder(order)
+      setOrders((current) => [savedOrder, ...current.filter((item) => item.id !== savedOrder.id)])
+
+      const [remoteProducts, remoteClients] = await Promise.all([api.listProducts(), api.listClients()])
+      setProducts(remoteProducts)
+      setClients(remoteClients)
+      setApiStatus((current) => ({ ...current, isOnline: true, message: `Pedido ${savedOrder.id} salvo no Firebird.` }))
+      return { ok: true, order: savedOrder }
+    } catch (error) {
+      const message = error.message || 'Nao foi possivel registrar o pedido.'
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
   }
 
   async function registerCartOrder() {
-    if (!apiStatus.isOnline || cartItems.length === 0) return
+    if (cartItems.length === 0) {
+      return { ok: false, message: 'Carrinho vazio.' }
+    }
+
+    if (!apiStatus.isOnline) {
+      const message = 'API offline. Ligue o backend para registrar o pedido no banco.'
+      setCheckoutStatus({ isSaving: false, message })
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
+    }
+
+    setCheckoutStatus({ isSaving: true, message: 'Registrando pedido no sistema...' })
 
     try {
       const savedOrder = await api.finalizeOrder({
@@ -652,8 +875,15 @@ function App() {
         })),
       })
       setOrders((current) => [savedOrder, ...current.filter((order) => order.id !== savedOrder.id)])
+      setCart([])
+      setCheckoutStatus({ isSaving: false, message: `Pedido ${savedOrder.id} salvo no banco.` })
+      setApiStatus((current) => ({ ...current, isOnline: true, message: `Pedido ${savedOrder.id} salvo no Firebird.` }))
+      return { ok: true, order: savedOrder }
     } catch (error) {
-      setApiStatus((current) => ({ ...current, message: error.message }))
+      const message = error.message || 'Nao foi possivel registrar o pedido.'
+      setCheckoutStatus({ isSaving: false, message })
+      setApiStatus((current) => ({ ...current, message }))
+      return { ok: false, message }
     }
   }
 
@@ -671,6 +901,7 @@ function App() {
     return (
       <AdminShell
         addClient={addClient}
+        addOrder={addOrder}
         addProduct={addProduct}
         addSupplier={addSupplier}
         apiStatus={apiStatus}
@@ -685,6 +916,15 @@ function App() {
         updateOrder={updateOrder}
         updateProduct={updateProduct}
         updateSupplier={updateSupplier}
+        showProductModal={showProductModal}
+        setShowProductModal={setShowProductModal}
+        showSupplierModal={showSupplierModal}
+        setShowSupplierModal={setShowSupplierModal}
+        showClientModal={showClientModal}
+        setShowClientModal={setShowClientModal}
+        showOrderModal={showOrderModal}
+        setShowOrderModal={setShowOrderModal}
+        ModalOverlay={ModalOverlay}
       />
     )
   }
@@ -697,6 +937,7 @@ function App() {
       cartItems={cartItems}
       cartTotal={cartTotal}
       cartNotice={cartNotice}
+      checkoutStatus={checkoutStatus}
       dismissCartNotice={() => setCartNotice(null)}
       registerCartOrder={registerCartOrder}
       setView={setView}
@@ -713,6 +954,7 @@ function Storefront({
   cartItems,
   cartTotal,
   cartNotice,
+  checkoutStatus,
   dismissCartNotice,
   registerCartOrder,
   setView,
@@ -910,6 +1152,7 @@ function Storefront({
       <CartDrawer
         cartItems={cartItems}
         cartTotal={cartTotal}
+        checkoutStatus={checkoutStatus}
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         onCheckout={registerCartOrder}
@@ -1185,7 +1428,37 @@ function Footer({ setView }) {
   )
 }
 
-function CartDrawer({ cartItems, cartTotal, isOpen, onCheckout, onClose, updateCartQuantity }) {
+function CartDrawer({ cartItems, cartTotal, checkoutStatus, isOpen, onCheckout, onClose, updateCartQuantity }) {
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const isCheckoutDisabled = cartItems.length === 0 || isSubmitting || checkoutStatus.isSaving
+
+  async function handleCheckout() {
+    if (isCheckoutDisabled) return
+
+    const whatsappUrl = checkoutLink(cartItems, cartTotal)
+    const whatsappWindow = window.open('', '_blank')
+
+    setIsSubmitting(true)
+    try {
+      const result = await onCheckout()
+
+      if (result?.ok) {
+        if (whatsappWindow) {
+          whatsappWindow.opener = null
+          whatsappWindow.location.href = whatsappUrl
+        } else {
+          window.location.href = whatsappUrl
+        }
+        onClose()
+        return
+      }
+
+      whatsappWindow?.close()
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <>
       <button
@@ -1246,16 +1519,16 @@ function CartDrawer({ cartItems, cartTotal, isOpen, onCheckout, onClose, updateC
             <span>Total</span>
             <strong>{formatCurrency(cartTotal)}</strong>
           </div>
-          <a
-            className={`button whatsapp ${cartItems.length === 0 ? 'is-disabled' : ''}`}
-            href={cartItems.length ? checkoutLink(cartItems, cartTotal) : undefined}
-            onClick={onCheckout}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            className={`button whatsapp ${isCheckoutDisabled ? 'is-disabled' : ''}`}
+            disabled={isCheckoutDisabled}
+            onClick={handleCheckout}
+            type="button"
           >
-            <MessageCircle size={18} />
-            Enviar no WhatsApp
-          </a>
+            {isSubmitting || checkoutStatus.isSaving ? <Clock3 size={18} /> : <MessageCircle size={18} />}
+            {isSubmitting || checkoutStatus.isSaving ? 'Salvando pedido...' : 'Finalizar no WhatsApp'}
+          </button>
+          {checkoutStatus.message && <p className="checkout-status">{checkoutStatus.message}</p>}
         </footer>
       </aside>
     </>
@@ -1264,6 +1537,7 @@ function CartDrawer({ cartItems, cartTotal, isOpen, onCheckout, onClose, updateC
 
 function AdminShell({
   addClient,
+  addOrder,
   addProduct,
   addSupplier,
   apiStatus,
@@ -1278,6 +1552,15 @@ function AdminShell({
   updateOrder,
   updateProduct,
   updateSupplier,
+  showProductModal,
+  setShowProductModal,
+  showSupplierModal,
+  setShowSupplierModal,
+  showClientModal,
+  setShowClientModal,
+  showOrderModal,
+  setShowOrderModal,
+  ModalOverlay,
 }) {
   const [activeSection, setActiveSection] = useState('overview')
 
@@ -1333,7 +1616,13 @@ function AdminShell({
         </header>
 
         {activeSection === 'overview' && (
-          <AdminOverview clients={clients} orders={orders} products={products} suppliers={suppliers} />
+          <AdminOverview
+            apiStatus={apiStatus}
+            clients={clients}
+            orders={orders}
+            products={products}
+            suppliers={suppliers}
+          />
         )}
         {activeSection === 'products' && (
           <AdminProducts
@@ -1341,6 +1630,9 @@ function AdminShell({
             products={products}
             suppliers={suppliers}
             updateProduct={updateProduct}
+            showModal={showProductModal}
+            setShowModal={setShowProductModal}
+            ModalOverlay={ModalOverlay}
           />
         )}
         {activeSection === 'stock' && <AdminStock products={products} updateProduct={updateProduct} />}
@@ -1349,6 +1641,9 @@ function AdminShell({
             addSupplier={addSupplier}
             suppliers={suppliers}
             updateSupplier={updateSupplier}
+            showModal={showSupplierModal}
+            setShowModal={setShowSupplierModal}
+            ModalOverlay={ModalOverlay}
           />
         )}
         {activeSection === 'clients' && (
@@ -1356,9 +1651,23 @@ function AdminShell({
             addClient={addClient}
             clients={clients}
             updateClient={updateClient}
+            showModal={showClientModal}
+            setShowModal={setShowClientModal}
+            ModalOverlay={ModalOverlay}
           />
         )}
-        {activeSection === 'orders' && <AdminOrders orders={orders} updateOrder={updateOrder} />}
+        {activeSection === 'orders' && (
+          <AdminOrders
+            addOrder={addOrder}
+            clients={clients}
+            orders={orders}
+            products={products}
+            updateOrder={updateOrder}
+            showModal={showOrderModal}
+            setShowModal={setShowOrderModal}
+            ModalOverlay={ModalOverlay}
+          />
+        )}
       </main>
     </div>
   )
@@ -1425,22 +1734,39 @@ function AdminLogin({ setIsAuthenticated, setView }) {
   )
 }
 
-function AdminOverview({ clients, orders, products, suppliers }) {
-  const inventoryUnits = products.reduce((total, product) => total + totalStock(product), 0)
-  const inventoryCost = products.reduce((total, product) => total + totalStock(product) * product.cost, 0)
-  const inventoryPotential = products.reduce((total, product) => total + totalStock(product) * product.price, 0)
-  const lowStockProducts = products.filter((product) => stockTone(product) !== 'healthy')
-  const salesTotal = orders.reduce((total, order) => total + order.total, 0)
+function AdminOverview({ apiStatus, clients, orders, products, suppliers }) {
+  const isDatabaseReady = apiStatus.isOnline && !apiStatus.isLoading
+  const dbProducts = isDatabaseReady ? products : []
+  const dbSuppliers = isDatabaseReady ? suppliers : []
+  const dbOrders = isDatabaseReady ? orders : []
+  const dbClients = isDatabaseReady ? clients : []
+  const inventoryUnits = dbProducts.reduce((total, product) => total + totalStock(product), 0)
+  const inventoryCost = dbProducts.reduce((total, product) => total + totalStock(product) * product.cost, 0)
+  const inventoryPotential = dbProducts.reduce((total, product) => total + totalStock(product) * product.price, 0)
+  const lowStockProducts = dbProducts.filter((product) => stockTone(product) !== 'healthy')
+  const salesTotal = dbOrders.reduce((total, order) => total + order.total, 0)
 
   const cards = [
     { label: 'Pecas em estoque', value: inventoryUnits, icon: Boxes, tone: 'gold' },
     { label: 'Valor de custo', value: formatCurrency(inventoryCost), icon: Warehouse, tone: 'green' },
     { label: 'Potencial de venda', value: formatCurrency(inventoryPotential), icon: TrendingUp, tone: 'lime' },
-    { label: 'Clientes ativos', value: clients.filter((client) => client.active !== false).length, icon: AtSign, tone: 'red' },
+    { label: 'Clientes ativos', value: dbClients.filter((client) => client.active !== false).length, icon: AtSign, tone: 'red' },
   ]
 
   return (
     <section className="admin-section">
+      <article className={`admin-data-banner ${isDatabaseReady ? 'is-online' : ''}`}>
+        <ShieldCheck size={18} />
+        <div>
+          <strong>{isDatabaseReady ? 'Resumo usando dados do Firebird' : 'Aguardando dados reais do banco'}</strong>
+          <span>
+            {apiStatus.isLoading
+              ? 'Conectando na API...'
+              : apiStatus.message || 'Nenhum dado local sera usado neste resumo.'}
+          </span>
+        </div>
+      </article>
+
       <div className="metric-grid">
         {cards.map((card) => (
           <article className={`metric-card ${card.tone}`} key={card.label}>
@@ -1468,7 +1794,11 @@ function AdminOverview({ clients, orders, products, suppliers }) {
                 <span>{product.category}</span>
               </div>
             ))}
-            {lowStockProducts.length === 0 && <p className="empty-state">Estoque saudavel em todas as linhas.</p>}
+            {lowStockProducts.length === 0 && (
+              <p className="empty-state">
+                {isDatabaseReady ? 'Estoque saudavel em todas as linhas.' : 'Conecte a API para carregar alertas reais.'}
+              </p>
+            )}
           </div>
         </article>
 
@@ -1478,7 +1808,7 @@ function AdminOverview({ clients, orders, products, suppliers }) {
             <UsersRound size={18} />
           </div>
           <div className="supplier-mini-list">
-            {suppliers.map((supplier) => (
+            {dbSuppliers.map((supplier) => (
               <div className="supplier-mini" key={supplier.id}>
                 <div>
                   <strong>{supplier.name}</strong>
@@ -1487,6 +1817,7 @@ function AdminOverview({ clients, orders, products, suppliers }) {
                 <span>{supplier.leadTime} dias</span>
               </div>
             ))}
+            {dbSuppliers.length === 0 && <p className="empty-state">Nenhum fornecedor carregado do banco.</p>}
           </div>
         </article>
       </div>
@@ -1497,7 +1828,7 @@ function AdminOverview({ clients, orders, products, suppliers }) {
           <strong>{formatCurrency(salesTotal)}</strong>
         </div>
         <div className="order-table compact-table">
-          {orders.map((order) => (
+          {dbOrders.map((order) => (
             <div className="order-row" key={order.id}>
               <strong>{order.id}</strong>
               <span>{order.customer}</span>
@@ -1506,142 +1837,335 @@ function AdminOverview({ clients, orders, products, suppliers }) {
               <span className="status-chip">{order.status}</span>
             </div>
           ))}
+          {dbOrders.length === 0 && <p className="empty-state">Nenhum pedido carregado do banco.</p>}
         </div>
       </article>
     </section>
   )
 }
 
-function AdminProducts({ addProduct, products, suppliers, updateProduct }) {
-  const [newProduct, setNewProduct] = useState({
-    name: '',
-    category: 'Camisas',
-    price: '',
-    cost: '',
-    supplierId: suppliers[0]?.id || '',
-  })
+function FormBlock({ children, className = '', title }) {
+  return (
+    <fieldset className={`form-block ${className}`}>
+      <legend>{title}</legend>
+      <div className="form-block-grid">{children}</div>
+    </fieldset>
+  )
+}
 
-  function handleSubmit(event) {
+function AdminProducts({ addProduct, products, suppliers, updateProduct, showModal, setShowModal, ModalOverlay }) {
+  const firstSupplierId = suppliers[0]?.id ? String(suppliers[0].id) : ''
+  const [newProduct, setNewProduct] = useState(() => emptyProductForm(firstSupplierId))
+  const [formStatus, setFormStatus] = useState({ tone: '', message: '' })
+  const [isSaving, setIsSaving] = useState(false)
+
+  function updateNewProduct(field, value) {
+    setNewProduct((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateProductSize(size, value) {
+    setNewProduct((current) => ({
+      ...current,
+      sizes: { ...current.sizes, [size]: value },
+    }))
+  }
+
+  async function handleSubmit(event) {
     event.preventDefault()
-    if (!newProduct.name.trim()) return
 
-    addProduct({
+    if (!newProduct.name.trim()) {
+      setFormStatus({ tone: 'error', message: 'Informe o nome do produto.' })
+      return
+    }
+
+    setIsSaving(true)
+    setFormStatus({ tone: '', message: '' })
+
+    const product = {
       id: `produto-${Date.now()}`,
       name: newProduct.name.trim(),
       category: newProduct.category,
       price: parseCurrency(newProduct.price),
       cost: parseCurrency(newProduct.cost),
-      image: productImages.training,
-      badge: 'Novo',
-      description: 'Produto cadastrado pelo painel interno.',
-      fabric: 'Dry fit',
-      colors: ['Preto'],
-      sizes: { P: 0, M: 0, G: 0, GG: 0 },
-      supplierId: newProduct.supplierId || suppliers[0]?.id || null,
-      reorderPoint: 10,
-      active: true,
-      launch: true,
-    })
+      image: newProduct.image.trim() || productImages.training,
+      badge: newProduct.badge.trim() || 'Novo',
+      description: newProduct.description.trim() || 'Produto cadastrado pelo painel interno.',
+      fabric: newProduct.fabric.trim() || 'Dry fit',
+      colors: colorsFromText(newProduct.colors).length ? colorsFromText(newProduct.colors) : ['Preto'],
+      sizes: sizesFromForm(newProduct.sizes),
+      supplierId: newProduct.supplierId || firstSupplierId || null,
+      reorderPoint: Number(newProduct.reorderPoint || 10),
+      active: newProduct.active,
+      launch: newProduct.launch,
+    }
 
-    setNewProduct({
-      name: '',
-      category: 'Camisas',
-      price: '',
-      cost: '',
-      supplierId: suppliers[0]?.id || '',
-    })
+    const result = await addProduct(product)
+    setIsSaving(false)
+
+    if (result?.ok) {
+      setFormStatus({ tone: 'success', message: `Produto ${result.product?.name || product.name} cadastrado.` })
+      setNewProduct(emptyProductForm(firstSupplierId))
+      return
+    }
+
+    setFormStatus({ tone: 'error', message: result?.message || 'Nao foi possivel cadastrar o produto.' })
   }
 
   return (
-    <section className="admin-section">
-      <form className="admin-form" onSubmit={handleSubmit}>
-        <label>
-          Produto
-          <input
-            onChange={(event) => setNewProduct((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Nome do produto"
-            value={newProduct.name}
-          />
-        </label>
-        <label>
-          Categoria
-          <select
-            onChange={(event) => setNewProduct((current) => ({ ...current, category: event.target.value }))}
-            value={newProduct.category}
+    <>
+      <section className="admin-section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0 }}>Produtos</h2>
+          <button
+            className="button primary"
+            onClick={() => setShowModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           >
-            {categories.slice(1).map((category) => (
-              <option key={category.name}>{category.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Preco
-          <input
-            inputMode="decimal"
-            onChange={(event) => setNewProduct((current) => ({ ...current, price: event.target.value }))}
-            placeholder="59,90"
-            value={newProduct.price}
-          />
-        </label>
-        <label>
-          Custo
-          <input
-            inputMode="decimal"
-            onChange={(event) => setNewProduct((current) => ({ ...current, cost: event.target.value }))}
-            placeholder="32,00"
-            value={newProduct.cost}
-          />
-        </label>
-        <label>
-          Fornecedor
-          <select
-            onChange={(event) => setNewProduct((current) => ({ ...current, supplierId: event.target.value }))}
-            value={newProduct.supplierId}
-          >
-            {suppliers.map((supplier) => (
-              <option key={supplier.id} value={supplier.id}>
-                {supplier.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="button primary" type="submit">
-          <Plus size={18} />
-          Cadastrar
-        </button>
-      </form>
+            <Plus size={18} />
+            Novo Produto
+          </button>
+        </div>
 
-      <div className="admin-list">
-        {products.map((product) => (
-          <article className="product-admin-row" key={product.id}>
-            <img src={product.image} alt="" />
-            <div>
-              <strong>{product.name}</strong>
-              <small>
-                {product.category} · {formatCurrency(product.price)} · {totalStock(product)} un.
-              </small>
-            </div>
-            <select
-              aria-label={`Categoria de ${product.name}`}
-              onChange={(event) => updateProduct(product.id, { category: event.target.value })}
-              value={product.category}
-            >
-              {categories.slice(1).map((category) => (
-                <option key={category.name}>{category.name}</option>
+        <div className="admin-list">
+          {products.map((product) => (
+            <article className="product-admin-row" key={product.id}>
+              <img src={product.image} alt="" />
+              <div className="product-admin-info">
+                <strong>{product.name}</strong>
+                <small>
+                  {product.category} · {formatCurrency(product.price)} · {totalStock(product)} un.
+                </small>
+                <p>{product.description}</p>
+              </div>
+              <div className="product-admin-controls">
+                <label>
+                  Categoria
+                  <select
+                    aria-label={`Categoria de ${product.name}`}
+                    onChange={(event) => updateProduct(product.id, { category: event.target.value })}
+                    value={product.category}
+                  >
+                    {categories.slice(1).map((category) => (
+                      <option key={category.name}>{category.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Fornecedor
+                  <select
+                    aria-label={`Fornecedor de ${product.name}`}
+                    onChange={(event) => updateProduct(product.id, { supplierId: event.target.value || null })}
+                    value={product.supplierId || ''}
+                  >
+                    <option value="">Sem fornecedor</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className={`status-toggle ${product.launch ? 'is-on' : ''}`}
+                  onClick={() => updateProduct(product.id, { launch: !product.launch })}
+                  type="button"
+                >
+                  <Sparkles size={16} />
+                  {product.launch ? 'Lancamento' : 'Linha'}
+                </button>
+                <button
+                  className={`status-toggle ${product.active ? 'is-on' : ''}`}
+                  onClick={() => updateProduct(product.id, { active: !product.active })}
+                  type="button"
+                >
+                  <CheckCircle2 size={16} />
+                  {product.active ? 'Publicado' : 'Oculto'}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <ModalOverlay
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        title="Novo Produto"
+      >
+        <form className="admin-form product-form organized-form" onSubmit={handleSubmit}>
+          <FormBlock title="Identificacao">
+            <label>
+              Produto
+              <input
+                onChange={(event) => updateNewProduct('name', event.target.value)}
+                placeholder="Nome do produto"
+                required
+                value={newProduct.name}
+              />
+            </label>
+            <label>
+              Categoria
+              <select
+                onChange={(event) => updateNewProduct('category', event.target.value)}
+                value={newProduct.category}
+              >
+                {categories.slice(1).map((category) => (
+                  <option key={category.name}>{category.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Fornecedor
+              <select
+                onChange={(event) => updateNewProduct('supplierId', event.target.value)}
+                value={newProduct.supplierId || firstSupplierId}
+              >
+                {!firstSupplierId && <option value="">Sem fornecedor</option>}
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Badge
+              <input
+                onChange={(event) => updateNewProduct('badge', event.target.value)}
+                placeholder="Novo"
+                value={newProduct.badge}
+              />
+            </label>
+          </FormBlock>
+
+          <FormBlock title="Preco e estoque">
+            <label>
+              Preco
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateNewProduct('price', event.target.value)}
+                placeholder="59,90"
+                value={newProduct.price}
+              />
+            </label>
+            <label>
+              Custo
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateNewProduct('cost', event.target.value)}
+                placeholder="32,00"
+                value={newProduct.cost}
+              />
+            </label>
+            <label>
+              Tecido
+              <input
+                onChange={(event) => updateNewProduct('fabric', event.target.value)}
+                placeholder="Dry fit"
+                value={newProduct.fabric}
+              />
+            </label>
+            <label>
+              Ponto de reposicao
+              <input
+                min="0"
+                onChange={(event) => updateNewProduct('reorderPoint', event.target.value)}
+                type="number"
+                value={newProduct.reorderPoint}
+              />
+            </label>
+          </FormBlock>
+
+          <FormBlock className="full" title="Apresentacao no catalogo">
+            <label className="wide-field">
+              Imagem do produto
+              <input
+                onChange={(event) => updateNewProduct('image', event.target.value)}
+                placeholder="https://..."
+                type="url"
+                value={newProduct.image}
+              />
+            </label>
+            <label className="wide-field">
+              Cores
+              <input
+                onChange={(event) => updateNewProduct('colors', event.target.value)}
+                placeholder="Preto, Branco, Azul"
+                value={newProduct.colors}
+              />
+            </label>
+            <label className="wide-field description-field">
+              Descricao
+              <textarea
+                onChange={(event) => updateNewProduct('description', event.target.value)}
+                placeholder="Detalhes comerciais do produto"
+                rows={3}
+                value={newProduct.description}
+              />
+            </label>
+          </FormBlock>
+
+          <FormBlock className="full" title="Grade inicial e publicacao">
+            <fieldset className="form-size-grid">
+              <legend>Grade inicial</legend>
+              {SIZES.map((size) => (
+                <label key={size}>
+                  {size}
+                  <input
+                    min="0"
+                    onChange={(event) => updateProductSize(size, event.target.value)}
+                    type="number"
+                    value={newProduct.sizes[size]}
+                  />
+                </label>
               ))}
-            </select>
-            <button
-              className={`status-toggle ${product.active ? 'is-on' : ''}`}
-              onClick={() => updateProduct(product.id, { active: !product.active })}
-              type="button"
-            >
-              <CheckCircle2 size={16} />
-              {product.active ? 'Publicado' : 'Oculto'}
-            </button>
-          </article>
-        ))}
-      </div>
-    </section>
+            </fieldset>
+
+            <div className="product-form-options">
+              <label className="checkbox-field">
+                <input
+                  checked={newProduct.active}
+                  onChange={(event) => updateNewProduct('active', event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Publicado</span>
+              </label>
+              <label className="checkbox-field">
+                <input
+                  checked={newProduct.launch}
+                  onChange={(event) => updateNewProduct('launch', event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Lancamento</span>
+              </label>
+            </div>
+
+            <div className="form-actions">
+              <button className="button primary" disabled={isSaving} type="submit">
+                <Plus size={18} />
+                {isSaving ? 'Cadastrando...' : 'Cadastrar'}
+              </button>
+              <button
+                className="ghost-button"
+                onClick={() => {
+                  setNewProduct(emptyProductForm(firstSupplierId))
+                  setFormStatus({ tone: '', message: '' })
+                }}
+                type="button"
+              >
+                Limpar
+              </button>
+            </div>
+          </FormBlock>
+
+          {formStatus.message && (
+            <p className={`form-feedback ${formStatus.tone}`} role="status">
+              {formStatus.message}
+            </p>
+          )}
+        </form>
+      </ModalOverlay>
+    </>
   )
 }
 
@@ -1695,21 +2219,27 @@ function AdminStock({ products, updateProduct }) {
   )
 }
 
-function AdminSuppliers({ addSupplier, suppliers, updateSupplier }) {
-  const [newSupplier, setNewSupplier] = useState({
-    name: '',
-    category: '',
-    contact: '',
-    phone: '',
-    city: '',
-    leadTime: '7',
-  })
+function AdminSuppliers({ addSupplier, suppliers, updateSupplier, showModal, setShowModal, ModalOverlay }) {
+  const [newSupplier, setNewSupplier] = useState(emptySupplierForm)
+  const [formStatus, setFormStatus] = useState({ tone: '', message: '' })
+  const [isSaving, setIsSaving] = useState(false)
 
-  function handleSubmit(event) {
+  function updateNewSupplier(field, value) {
+    setNewSupplier((current) => ({ ...current, [field]: value }))
+  }
+
+  async function handleSubmit(event) {
     event.preventDefault()
-    if (!newSupplier.name.trim()) return
 
-    addSupplier({
+    if (!newSupplier.name.trim()) {
+      setFormStatus({ tone: 'error', message: 'Informe o nome do fornecedor.' })
+      return
+    }
+
+    setIsSaving(true)
+    setFormStatus({ tone: '', message: '' })
+
+    const supplier = {
       id: `fornecedor-${Date.now()}`,
       name: newSupplier.name.trim(),
       category: newSupplier.category || 'Fornecedor geral',
@@ -1717,137 +2247,234 @@ function AdminSuppliers({ addSupplier, suppliers, updateSupplier }) {
       phone: newSupplier.phone || '(00) 00000-0000',
       city: newSupplier.city || 'Brasil',
       leadTime: Number(newSupplier.leadTime) || 7,
-      rating: 4.6,
-      openOrders: 0,
-      status: 'Em avaliacao',
-    })
+      rating: parseCurrency(newSupplier.rating || '4,6'),
+      openOrders: Number(newSupplier.openOrders || 0),
+      status: newSupplier.status || 'Em avaliacao',
+      active: newSupplier.active,
+    }
 
-    setNewSupplier({
-      name: '',
-      category: '',
-      contact: '',
-      phone: '',
-      city: '',
-      leadTime: '7',
-    })
+    const result = await addSupplier(supplier)
+    setIsSaving(false)
+
+    if (result?.ok) {
+      setFormStatus({ tone: 'success', message: `Fornecedor ${result.supplier?.name || supplier.name} cadastrado.` })
+      setNewSupplier(emptySupplierForm())
+      return
+    }
+
+    setFormStatus({ tone: 'error', message: result?.message || 'Nao foi possivel cadastrar o fornecedor.' })
   }
 
   return (
-    <section className="admin-section">
-      <form className="admin-form supplier-form" onSubmit={handleSubmit}>
-        <label>
-          Fornecedor
-          <input
-            onChange={(event) => setNewSupplier((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Nome da empresa"
-            value={newSupplier.name}
-          />
-        </label>
-        <label>
-          Linha
-          <input
-            onChange={(event) => setNewSupplier((current) => ({ ...current, category: event.target.value }))}
-            placeholder="Ex: Dry fit premium"
-            value={newSupplier.category}
-          />
-        </label>
-        <label>
-          Contato
-          <input
-            onChange={(event) => setNewSupplier((current) => ({ ...current, contact: event.target.value }))}
-            placeholder="Responsavel"
-            value={newSupplier.contact}
-          />
-        </label>
-        <label>
-          Telefone
-          <input
-            onChange={(event) => setNewSupplier((current) => ({ ...current, phone: event.target.value }))}
-            placeholder="(00) 00000-0000"
-            value={newSupplier.phone}
-          />
-        </label>
-        <label>
-          Cidade
-          <input
-            onChange={(event) => setNewSupplier((current) => ({ ...current, city: event.target.value }))}
-            placeholder="Cidade - UF"
-            value={newSupplier.city}
-          />
-        </label>
-        <label>
-          Lead time
-          <input
-            min="1"
-            onChange={(event) => setNewSupplier((current) => ({ ...current, leadTime: event.target.value }))}
-            type="number"
-            value={newSupplier.leadTime}
-          />
-        </label>
-        <button className="button primary" type="submit">
-          <Plus size={18} />
-          Adicionar
-        </button>
-      </form>
+    <>
+      <section className="admin-section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0 }}>Fornecedores</h2>
+          <button
+            className="button primary"
+            onClick={() => setShowModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
+            <Plus size={18} />
+            Novo Fornecedor
+          </button>
+        </div>
 
-      <div className="supplier-grid">
-        {suppliers.map((supplier) => (
-          <article className="supplier-card" key={supplier.id}>
-            <div className="supplier-top">
-              <div>
-                <strong>{supplier.name}</strong>
-                <small>{supplier.category}</small>
+        <div className="supplier-grid">
+          {suppliers.map((supplier) => (
+            <article className="supplier-card" key={supplier.id}>
+              <div className="supplier-top">
+                <div>
+                  <strong>{supplier.name}</strong>
+                  <small>{supplier.category}</small>
+                </div>
+                <span>{supplier.rating.toFixed(1)}</span>
               </div>
-              <span>{supplier.rating.toFixed(1)}</span>
+              <p>{supplier.contact}</p>
+              <div className="supplier-facts">
+                <span>
+                  <Phone size={15} />
+                  {supplier.phone}
+                </span>
+                <span>
+                  <MapPin size={15} />
+                  {supplier.city}
+                </span>
+                <span>
+                  <Clock3 size={15} />
+                  {supplier.leadTime} dias
+                </span>
+              </div>
+              <select
+                aria-label={`Status de ${supplier.name}`}
+                onChange={(event) => updateSupplier(supplier.id, { status: event.target.value })}
+                value={supplier.status}
+              >
+                <option>Homologado</option>
+                <option>Em producao</option>
+                <option>Em avaliacao</option>
+                <option>Pausado</option>
+              </select>
+              <button
+                className={`status-toggle ${supplier.active !== false ? 'is-on' : ''}`}
+                onClick={() => updateSupplier(supplier.id, { active: supplier.active === false })}
+                type="button"
+              >
+                <CheckCircle2 size={16} />
+                {supplier.active !== false ? 'Ativo' : 'Inativo'}
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <ModalOverlay
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        title="Novo Fornecedor"
+      >
+        <form className="admin-form product-form organized-form" onSubmit={handleSubmit}>
+          <FormBlock title="Dados do fornecedor">
+            <label>
+              Fornecedor
+              <input
+                onChange={(event) => updateNewSupplier('name', event.target.value)}
+                placeholder="Nome da empresa"
+                required
+                value={newSupplier.name}
+              />
+            </label>
+            <label>
+              Linha
+              <input
+                onChange={(event) => updateNewSupplier('category', event.target.value)}
+                placeholder="Ex: Dry fit premium"
+                value={newSupplier.category}
+              />
+            </label>
+            <label>
+              Contato
+              <input
+                onChange={(event) => updateNewSupplier('contact', event.target.value)}
+                placeholder="Responsavel"
+                value={newSupplier.contact}
+              />
+            </label>
+            <label>
+              Telefone
+              <input
+                onChange={(event) => updateNewSupplier('phone', event.target.value)}
+                placeholder="(00) 00000-0000"
+                value={newSupplier.phone}
+              />
+            </label>
+          </FormBlock>
+
+          <FormBlock title="Operacao e status">
+            <label>
+              Cidade
+              <input
+                onChange={(event) => updateNewSupplier('city', event.target.value)}
+                placeholder="Cidade - UF"
+                value={newSupplier.city}
+              />
+            </label>
+            <label>
+              Lead time
+              <input
+                min="1"
+                onChange={(event) => updateNewSupplier('leadTime', event.target.value)}
+                type="number"
+                value={newSupplier.leadTime}
+              />
+            </label>
+            <label>
+              Avaliacao
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateNewSupplier('rating', event.target.value)}
+                placeholder="4,6"
+                value={newSupplier.rating}
+              />
+            </label>
+            <label>
+              Pedidos abertos
+              <input
+                min="0"
+                onChange={(event) => updateNewSupplier('openOrders', event.target.value)}
+                type="number"
+                value={newSupplier.openOrders}
+              />
+            </label>
+            <label>
+              Status
+              <select onChange={(event) => updateNewSupplier('status', event.target.value)} value={newSupplier.status}>
+                <option>Homologado</option>
+                <option>Em producao</option>
+                <option>Em avaliacao</option>
+                <option>Pausado</option>
+              </select>
+            </label>
+            <div className="product-form-options">
+              <label className="checkbox-field">
+                <input
+                  checked={newSupplier.active}
+                  onChange={(event) => updateNewSupplier('active', event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Ativo</span>
+              </label>
             </div>
-            <p>{supplier.contact}</p>
-            <div className="supplier-facts">
-              <span>
-                <Phone size={15} />
-                {supplier.phone}
-              </span>
-              <span>
-                <MapPin size={15} />
-                {supplier.city}
-              </span>
-              <span>
-                <Clock3 size={15} />
-                {supplier.leadTime} dias
-              </span>
-            </div>
-            <select
-              aria-label={`Status de ${supplier.name}`}
-              onChange={(event) => updateSupplier(supplier.id, { status: event.target.value })}
-              value={supplier.status}
+          </FormBlock>
+
+          <div className="form-actions full">
+            <button className="button primary" disabled={isSaving} type="submit">
+              <Plus size={18} />
+              {isSaving ? 'Cadastrando...' : 'Cadastrar'}
+            </button>
+            <button
+              className="ghost-button"
+              onClick={() => {
+                setNewSupplier(emptySupplierForm())
+                setFormStatus({ tone: '', message: '' })
+              }}
+              type="button"
             >
-              <option>Homologado</option>
-              <option>Em producao</option>
-              <option>Em avaliacao</option>
-              <option>Pausado</option>
-            </select>
-          </article>
-        ))}
-      </div>
-    </section>
+              Limpar
+            </button>
+          </div>
+          {formStatus.message && (
+            <p className={`form-feedback ${formStatus.tone}`} role="status">
+              {formStatus.message}
+            </p>
+          )}
+        </form>
+      </ModalOverlay>
+    </>
   )
 }
 
-function AdminClients({ addClient, clients, updateClient }) {
-  const [newClient, setNewClient] = useState({
-    name: '',
-    document: '',
-    phone: '',
-    email: '',
-    city: '',
-    uf: '',
-    type: 'Consumidor',
-  })
+function AdminClients({ addClient, clients, updateClient, showModal, setShowModal, ModalOverlay }) {
+  const [newClient, setNewClient] = useState(emptyClientForm)
+  const [formStatus, setFormStatus] = useState({ tone: '', message: '' })
+  const [isSaving, setIsSaving] = useState(false)
 
-  function handleSubmit(event) {
+  function updateNewClient(field, value) {
+    setNewClient((current) => ({ ...current, [field]: value }))
+  }
+
+  async function handleSubmit(event) {
     event.preventDefault()
-    if (!newClient.name.trim()) return
 
-    addClient({
+    if (!newClient.name.trim()) {
+      setFormStatus({ tone: 'error', message: 'Informe o nome do cliente.' })
+      return
+    }
+
+    setIsSaving(true)
+    setFormStatus({ tone: '', message: '' })
+
+    const client = {
       id: `cliente-${Date.now()}`,
       name: newClient.name.trim(),
       document: newClient.document,
@@ -1856,174 +2483,533 @@ function AdminClients({ addClient, clients, updateClient }) {
       city: newClient.city,
       uf: newClient.uf,
       type: newClient.type,
-      notes: 'Cliente cadastrado pelo painel interno.',
-      active: true,
-    })
+      notes: newClient.notes || 'Cliente cadastrado pelo painel interno.',
+      active: newClient.active,
+    }
 
-    setNewClient({
-      name: '',
-      document: '',
-      phone: '',
-      email: '',
-      city: '',
-      uf: '',
-      type: 'Consumidor',
-    })
+    const result = await addClient(client)
+    setIsSaving(false)
+
+    if (result?.ok) {
+      setFormStatus({ tone: 'success', message: `Cliente ${result.client?.name || client.name} cadastrado.` })
+      setNewClient(emptyClientForm())
+      return
+    }
+
+    setFormStatus({ tone: 'error', message: result?.message || 'Nao foi possivel cadastrar o cliente.' })
   }
 
   return (
-    <section className="admin-section">
-      <form className="admin-form supplier-form" onSubmit={handleSubmit}>
-        <label>
-          Cliente
-          <input
-            onChange={(event) => setNewClient((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Nome ou empresa"
-            value={newClient.name}
-          />
-        </label>
-        <label>
-          Documento
-          <input
-            onChange={(event) => setNewClient((current) => ({ ...current, document: event.target.value }))}
-            placeholder="CPF ou CNPJ"
-            value={newClient.document}
-          />
-        </label>
-        <label>
-          Telefone
-          <input
-            onChange={(event) => setNewClient((current) => ({ ...current, phone: event.target.value }))}
-            placeholder="(00) 00000-0000"
-            value={newClient.phone}
-          />
-        </label>
-        <label>
-          E-mail
-          <input
-            onChange={(event) => setNewClient((current) => ({ ...current, email: event.target.value }))}
-            placeholder="cliente@email.com"
-            value={newClient.email}
-          />
-        </label>
-        <label>
-          Cidade
-          <input
-            onChange={(event) => setNewClient((current) => ({ ...current, city: event.target.value }))}
-            placeholder="Cidade"
-            value={newClient.city}
-          />
-        </label>
-        <label>
-          UF
-          <input
-            maxLength={2}
-            onChange={(event) => setNewClient((current) => ({ ...current, uf: event.target.value }))}
-            placeholder="PB"
-            value={newClient.uf}
-          />
-        </label>
-        <label>
-          Tipo
-          <select
-            onChange={(event) => setNewClient((current) => ({ ...current, type: event.target.value }))}
-            value={newClient.type}
+    <>
+      <section className="admin-section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0 }}>Clientes</h2>
+          <button
+            className="button primary"
+            onClick={() => setShowModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           >
-            <option>Consumidor</option>
-            <option>Revenda</option>
-            <option>Academia</option>
-            <option>WhatsApp</option>
-          </select>
-        </label>
-        <button className="button primary" type="submit">
-          <Plus size={18} />
-          Adicionar
-        </button>
-      </form>
+            <Plus size={18} />
+            Novo Cliente
+          </button>
+        </div>
 
-      <div className="supplier-grid">
-        {clients.map((client) => (
-          <article className="supplier-card" key={client.id}>
-            <div className="supplier-top">
-              <div>
-                <strong>{client.name}</strong>
-                <small>{client.document || 'Documento nao informado'}</small>
+        <div className="supplier-grid">
+          {clients.map((client) => (
+            <article className="supplier-card" key={client.id}>
+              <div className="supplier-top">
+                <div>
+                  <strong>{client.name}</strong>
+                  <small>{client.document || 'Documento nao informado'}</small>
+                </div>
+                <span>{client.type || 'Cliente'}</span>
               </div>
-              <span>{client.type || 'Cliente'}</span>
+              <p>{client.notes || client.email || 'Cliente RB Dry Fit'}</p>
+              <div className="supplier-facts">
+                <span>
+                  <Phone size={15} />
+                  {client.phone || 'Sem telefone'}
+                </span>
+                <span>
+                  <Mail size={15} />
+                  {client.email || 'Sem e-mail'}
+                </span>
+                <span>
+                  <MapPin size={15} />
+                  {[client.city, client.uf].filter(Boolean).join(' - ') || 'Brasil'}
+                </span>
+              </div>
+              <select
+                aria-label={`Tipo de ${client.name}`}
+                onChange={(event) => updateClient(client.id, { type: event.target.value })}
+                value={client.type || 'Consumidor'}
+              >
+                <option>Consumidor</option>
+                <option>Revenda</option>
+                <option>Academia</option>
+                <option>WhatsApp</option>
+              </select>
+              <button
+                className={`status-toggle ${client.active !== false ? 'is-on' : ''}`}
+                onClick={() => updateClient(client.id, { active: client.active === false })}
+                type="button"
+              >
+                <CheckCircle2 size={16} />
+                {client.active !== false ? 'Ativo' : 'Inativo'}
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <ModalOverlay
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        title="Novo Cliente"
+      >
+        <form className="admin-form product-form organized-form" onSubmit={handleSubmit}>
+          <FormBlock title="Dados do cliente">
+            <label>
+              Cliente
+              <input
+                onChange={(event) => updateNewClient('name', event.target.value)}
+                placeholder="Nome ou empresa"
+                required
+                value={newClient.name}
+              />
+            </label>
+            <label>
+              Documento
+              <input
+                onChange={(event) => updateNewClient('document', event.target.value)}
+                placeholder="CPF ou CNPJ"
+                value={newClient.document}
+              />
+            </label>
+            <label>
+              Telefone
+              <input
+                onChange={(event) => updateNewClient('phone', event.target.value)}
+                placeholder="(00) 00000-0000"
+                value={newClient.phone}
+              />
+            </label>
+            <label>
+              E-mail
+              <input
+                onChange={(event) => updateNewClient('email', event.target.value)}
+                placeholder="cliente@email.com"
+                type="email"
+                value={newClient.email}
+              />
+            </label>
+          </FormBlock>
+
+          <FormBlock title="Perfil comercial">
+            <label>
+              Cidade
+              <input
+                onChange={(event) => updateNewClient('city', event.target.value)}
+                placeholder="Cidade"
+                value={newClient.city}
+              />
+            </label>
+            <label>
+              UF
+              <input
+                maxLength={2}
+                onChange={(event) => updateNewClient('uf', event.target.value)}
+                placeholder="PB"
+                value={newClient.uf}
+              />
+            </label>
+            <label>
+              Tipo
+              <select
+                onChange={(event) => updateNewClient('type', event.target.value)}
+                value={newClient.type}
+              >
+                <option>Consumidor</option>
+                <option>Revenda</option>
+                <option>Academia</option>
+                <option>WhatsApp</option>
+              </select>
+            </label>
+            <div className="product-form-options">
+              <label className="checkbox-field">
+                <input
+                  checked={newClient.active}
+                  onChange={(event) => updateNewClient('active', event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Ativo</span>
+              </label>
             </div>
-            <p>{client.notes || client.email || 'Cliente RB Dry Fit'}</p>
-            <div className="supplier-facts">
-              <span>
-                <Phone size={15} />
-                {client.phone || 'Sem telefone'}
-              </span>
-              <span>
-                <Mail size={15} />
-                {client.email || 'Sem e-mail'}
-              </span>
-              <span>
-                <MapPin size={15} />
-                {[client.city, client.uf].filter(Boolean).join(' - ') || 'Brasil'}
-              </span>
-            </div>
-            <select
-              aria-label={`Tipo de ${client.name}`}
-              onChange={(event) => updateClient(client.id, { type: event.target.value })}
-              value={client.type || 'Consumidor'}
-            >
-              <option>Consumidor</option>
-              <option>Revenda</option>
-              <option>Academia</option>
-              <option>WhatsApp</option>
-            </select>
+          </FormBlock>
+
+          <FormBlock className="full" title="Observacoes">
+            <label className="wide-field description-field">
+              Observacao
+              <textarea
+                onChange={(event) => updateNewClient('notes', event.target.value)}
+                placeholder="Historico, preferencias ou condicoes comerciais"
+                rows={3}
+                value={newClient.notes}
+              />
+            </label>
+          </FormBlock>
+
+          <div className="form-actions full">
+            <button className="button primary" disabled={isSaving} type="submit">
+              <Plus size={18} />
+              {isSaving ? 'Cadastrando...' : 'Cadastrar'}
+            </button>
             <button
-              className={`status-toggle ${client.active !== false ? 'is-on' : ''}`}
-              onClick={() => updateClient(client.id, { active: client.active === false })}
+              className="ghost-button"
+              onClick={() => {
+                setNewClient(emptyClientForm())
+                setFormStatus({ tone: '', message: '' })
+              }}
               type="button"
             >
-              <CheckCircle2 size={16} />
-              {client.active !== false ? 'Ativo' : 'Inativo'}
+              Limpar
             </button>
-          </article>
-        ))}
-      </div>
-    </section>
+          </div>
+          {formStatus.message && (
+            <p className={`form-feedback ${formStatus.tone}`} role="status">
+              {formStatus.message}
+            </p>
+          )}
+        </form>
+      </ModalOverlay>
+    </>
   )
 }
 
-function AdminOrders({ orders, updateOrder }) {
+function AdminOrders({ addOrder, clients, orders, products, updateOrder, showModal, setShowModal, ModalOverlay }) {
+  const [newOrder, setNewOrder] = useState(() => emptyOrderForm(products))
+  const [formStatus, setFormStatus] = useState({ tone: '', message: '' })
+  const [isSaving, setIsSaving] = useState(false)
+
+  function updateNewOrder(field, value) {
+    setNewOrder((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateNewOrderItem(index, field, value) {
+    setNewOrder((current) => {
+      const items = [...current.items]
+      items[index] = { ...items[index], [field]: value }
+
+      if (field === 'productId') {
+        const selectedProduct = products.find((product) => String(product.id) === value)
+        items[index].productName = selectedProduct?.name || ''
+        items[index].unitPrice = selectedProduct?.price ? String(selectedProduct.price).replace('.', ',') : ''
+      }
+
+      return { ...current, items }
+    })
+  }
+
+  function addOrderItem() {
+    setNewOrder((current) => ({ ...current, items: [...current.items, emptyOrderItem(products[0])] }))
+  }
+
+  function removeOrderItem(index) {
+    setNewOrder((current) => ({
+      ...current,
+      items: current.items.filter((_, itemIndex) => itemIndex !== index),
+    }))
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+
+    if (!newOrder.customerName.trim()) {
+      setFormStatus({ tone: 'error', message: 'Informe o nome do cliente.' })
+      return
+    }
+
+    if (!newOrder.items.length || newOrder.items.some((item) => !item.productId || !Number(item.quantity))) {
+      setFormStatus({ tone: 'error', message: 'Adicione ao menos um item com produto e quantidade.' })
+      return
+    }
+
+    setIsSaving(true)
+    setFormStatus({ tone: '', message: '' })
+
+    const orderPayload = {
+      clientId: numericId(newOrder.clientId) || newOrder.clientId || null,
+      customerName: newOrder.customerName.trim(),
+      customerPhone: newOrder.customerPhone.trim(),
+      payment: newOrder.payment,
+      status: newOrder.status,
+      discount: parseCurrency(newOrder.discount),
+      surcharge: parseCurrency(newOrder.surcharge),
+      notes: newOrder.notes.trim(),
+      items: newOrder.items.map((item) => ({
+        productId: numericId(item.productId) || item.productId || null,
+        productName: item.productName,
+        size: item.size,
+        quantity: Number(item.quantity) || 0,
+        unitPrice: parseCurrency(item.unitPrice),
+      })),
+    }
+
+    const result = await addOrder(orderPayload)
+    setIsSaving(false)
+
+    if (result?.ok) {
+      setFormStatus({ tone: 'success', message: `Pedido ${result.order?.id || 'cadastrado'} salvo.` })
+      setNewOrder(emptyOrderForm(products))
+      setShowModal(false)
+      return
+    }
+
+    setFormStatus({ tone: 'error', message: result?.message || 'Nao foi possivel cadastrar o pedido.' })
+  }
+
   return (
-    <section className="admin-section">
-      <div className="orders-board">
-        {orders.map((order) => (
-          <article className="order-card" key={order.id}>
-            <div className="order-card-top">
-              <div>
-                <strong>{order.id}</strong>
-                <small>{order.date}</small>
+    <>
+      <section className="admin-section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0 }}>Pedidos</h2>
+          <button
+            className="button primary"
+            onClick={() => setShowModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
+            <Plus size={18} />
+            Novo Pedido
+          </button>
+        </div>
+
+        <div className="orders-board">
+          {orders.map((order) => (
+            <article className="order-card" key={order.id}>
+              <div className="order-card-top">
+                <div>
+                  <strong>{order.id}</strong>
+                  <small>{order.date}</small>
+                </div>
+                <span>{formatCurrency(order.total)}</span>
               </div>
-              <span>{formatCurrency(order.total)}</span>
-            </div>
-            <h2>{order.customer}</h2>
-            <div className="order-card-meta">
-              <span>{order.items}</span>
-              <span>{order.payment}</span>
-            </div>
+              <h2>{order.customer}</h2>
+              <div className="order-card-meta">
+                <span>{order.items}</span>
+                <span>{order.payment}</span>
+              </div>
+              <label>
+                Status
+                <select
+                  onChange={(event) => updateOrder(order.id, { status: event.target.value })}
+                  value={order.status}
+                >
+                  {orderStatuses.map((status) => (
+                    <option key={status}>{status}</option>
+                  ))}
+                </select>
+              </label>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <ModalOverlay
+        isOpen={showModal}
+        onClose={() => {
+          setShowModal(false)
+          setFormStatus({ tone: '', message: '' })
+          setNewOrder(emptyOrderForm(products))
+        }}
+        title="Novo Pedido"
+      >
+        <form className="admin-form product-form organized-form" onSubmit={handleSubmit}>
+          <FormBlock title="Dados do cliente">
+            <label>
+              Cliente existente
+              <select
+                onChange={(event) => {
+                  const clientId = event.target.value
+                  const client = clients.find((item) => String(item.id) === clientId)
+                  setNewOrder((current) => ({
+                    ...current,
+                    clientId,
+                    customerName: client?.name || current.customerName,
+                    customerPhone: client?.phone || current.customerPhone,
+                  }))
+                }}
+                value={newOrder.clientId}
+              >
+                <option value="">Nenhum</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Nome do cliente
+              <input
+                required
+                onChange={(event) => updateNewOrder('customerName', event.target.value)}
+                placeholder="Nome do cliente"
+                value={newOrder.customerName}
+              />
+            </label>
+            <label>
+              Telefone
+              <input
+                onChange={(event) => updateNewOrder('customerPhone', event.target.value)}
+                placeholder="(00) 00000-0000"
+                value={newOrder.customerPhone}
+              />
+            </label>
+          </FormBlock>
+
+          <FormBlock title="Pagamento e status">
+            <label>
+              Pagamento
+              <select
+                onChange={(event) => updateNewOrder('payment', event.target.value)}
+                value={newOrder.payment}
+              >
+                <option>Pix</option>
+                <option>Cartao</option>
+                <option>Dinheiro</option>
+                <option>Transferencia</option>
+              </select>
+            </label>
             <label>
               Status
               <select
-                onChange={(event) => updateOrder(order.id, { status: event.target.value })}
-                value={order.status}
+                onChange={(event) => updateNewOrder('status', event.target.value)}
+                value={newOrder.status}
               >
                 {orderStatuses.map((status) => (
                   <option key={status}>{status}</option>
                 ))}
               </select>
             </label>
-          </article>
-        ))}
-      </div>
-    </section>
+            <label>
+              Desconto
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateNewOrder('discount', event.target.value)}
+                placeholder="0,00"
+                value={newOrder.discount}
+              />
+            </label>
+            <label>
+              Acrescimo
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateNewOrder('surcharge', event.target.value)}
+                placeholder="0,00"
+                value={newOrder.surcharge}
+              />
+            </label>
+          </FormBlock>
+
+          <FormBlock className="full" title="Itens do pedido">
+            {newOrder.items.map((item, index) => (
+              <div key={`${item.productId}-${index}`} style={{ display: 'grid', gap: '10px', marginBottom: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 0.9fr 0.7fr auto', gap: '10px' }}>
+                  <label>
+                    Produto
+                    <select
+                      onChange={(event) => updateNewOrderItem(index, 'productId', event.target.value)}
+                      value={item.productId}
+                    >
+                      <option value="">Selecione</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Tamanho
+                    <input
+                      onChange={(event) => updateNewOrderItem(index, 'size', event.target.value)}
+                      placeholder="P"
+                      value={item.size}
+                    />
+                  </label>
+                  <label>
+                    Qtde
+                    <input
+                      min="1"
+                      onChange={(event) => updateNewOrderItem(index, 'quantity', event.target.value)}
+                      type="number"
+                      value={item.quantity}
+                    />
+                  </label>
+                  <label>
+                    Preco
+                    <input
+                      inputMode="decimal"
+                      onChange={(event) => updateNewOrderItem(index, 'unitPrice', event.target.value)}
+                      placeholder="0,00"
+                      value={item.unitPrice}
+                    />
+                  </label>
+                  <button
+                    className="ghost-button"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      removeOrderItem(index)
+                    }}
+                    type="button"
+                    style={{ alignSelf: 'end' }}
+                  >
+                    Remover
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button className="ghost-button" onClick={(event) => { event.preventDefault(); addOrderItem() }} type="button">
+              Adicionar item
+            </button>
+          </FormBlock>
+
+          <FormBlock className="full" title="Notas do pedido">
+            <label className="wide-field description-field">
+              Notas
+              <textarea
+                onChange={(event) => updateNewOrder('notes', event.target.value)}
+                rows={3}
+                value={newOrder.notes}
+              />
+            </label>
+          </FormBlock>
+
+          <div className="form-actions full">
+            <button className="button primary" disabled={isSaving} type="submit">
+              <Plus size={18} />
+              {isSaving ? 'Salvando...' : 'Cadastrar pedido'}
+            </button>
+            <button
+              className="ghost-button"
+              onClick={(event) => {
+                event.preventDefault()
+                setNewOrder(emptyOrderForm(products))
+                setFormStatus({ tone: '', message: '' })
+              }}
+              type="button"
+            >
+              Limpar
+            </button>
+          </div>
+          {formStatus.message && (
+            <p className={`form-feedback ${formStatus.tone}`} role="status">
+              {formStatus.message}
+            </p>
+          )}
+        </form>
+      </ModalOverlay>
+    </>
   )
 }
 
