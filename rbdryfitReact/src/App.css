@@ -1090,6 +1090,18 @@
   font-size: 2rem;
 }
 
+.api-status {
+  display: block;
+  margin-top: 7px;
+  color: #8a5d14;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.api-status.is-online {
+  color: #0a8f61;
+}
+
 .admin-actions .ghost-button {
   color: var(--admin-text);
   border-color: rgba(17, 24, 39, 0.14);

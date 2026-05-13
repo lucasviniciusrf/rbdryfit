@@ -37,9 +37,10 @@ import {
   Warehouse,
   X,
 } from 'lucide-react'
+import { api } from './service/api'
 import './App.css'
 
-const WHATSAPP_NUMBER = '5585989157437'
+const WHATSAPP_NUMBER = '5583991082689'
 const ADMIN_EMAIL = 'admin@rbdryfit.com'
 const ADMIN_PASSWORD = 'rb2026'
 const SIZES = ['P', 'M', 'G', 'GG', 'XG']
@@ -233,6 +234,33 @@ const defaultOrders = [
   },
 ]
 
+const defaultClients = [
+  {
+    id: 'iron-club',
+    name: 'Academia Iron Club',
+    document: '11222333000144',
+    phone: '(83) 99100-2040',
+    email: 'compras@ironclub.com',
+    city: 'Campina Grande',
+    uf: 'PB',
+    type: 'Academia',
+    notes: 'Compra recorrente para alunos e loja interna.',
+    active: true,
+  },
+  {
+    id: 'move-pro',
+    name: 'Studio Move Pro',
+    document: '22333444000155',
+    phone: '(85) 98115-8722',
+    email: 'movepro@studio.com',
+    city: 'Fortaleza',
+    uf: 'CE',
+    type: 'Revenda',
+    notes: 'Prioridade para kits e camisetas de time.',
+    active: true,
+  },
+]
+
 const categories = [
   { name: 'Todos', icon: Sparkles, image: productImages.hero },
   { name: 'Camisas', icon: Shirt, image: productImages.shirtBlack },
@@ -247,6 +275,7 @@ const adminSections = [
   { id: 'products', label: 'Produtos', icon: Boxes },
   { id: 'stock', label: 'Estoque', icon: Warehouse },
   { id: 'suppliers', label: 'Fornecedores', icon: UsersRound },
+  { id: 'clients', label: 'Clientes', icon: AtSign },
   { id: 'orders', label: 'Pedidos', icon: ClipboardList },
 ]
 
@@ -316,14 +345,69 @@ function checkoutLink(items, total) {
   return `https://wa.me/${WHATSAPP_NUMBER}?text=${message}`
 }
 
+function numericId(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function productPayload(product) {
+  return {
+    name: product.name,
+    category: product.category,
+    price: Number(product.price || 0),
+    cost: Number(product.cost || 0),
+    image: product.image,
+    badge: product.badge,
+    description: product.description,
+    fabric: product.fabric,
+    colors: product.colors || [],
+    sizes: product.sizes || {},
+    supplierId: numericId(product.supplierId),
+    reorderPoint: Number(product.reorderPoint || 0),
+    active: Boolean(product.active),
+    launch: Boolean(product.launch),
+  }
+}
+
+function supplierPayload(supplier) {
+  return {
+    name: supplier.name,
+    category: supplier.category,
+    contact: supplier.contact,
+    phone: supplier.phone,
+    city: supplier.city,
+    leadTime: Number(supplier.leadTime || 7),
+    rating: Number(supplier.rating || 4.6),
+    openOrders: Number(supplier.openOrders || 0),
+    status: supplier.status,
+    active: supplier.active !== false,
+  }
+}
+
+function clientPayload(client) {
+  return {
+    name: client.name,
+    document: client.document,
+    phone: client.phone,
+    email: client.email,
+    city: client.city,
+    uf: client.uf,
+    type: client.type,
+    notes: client.notes,
+    active: client.active !== false,
+  }
+}
+
 function App() {
   const [view, setViewState] = useState(() => (window.location.hash === '#admin' ? 'admin' : 'store'))
-  const [products, setProducts] = usePersistentState('rb-admin-products', defaultProducts)
-  const [suppliers, setSuppliers] = usePersistentState('rb-admin-suppliers', defaultSuppliers)
-  const [orders, setOrders] = usePersistentState('rb-admin-orders', defaultOrders)
+  const [products, setProducts] = useState(defaultProducts)
+  const [suppliers, setSuppliers] = useState(defaultSuppliers)
+  const [orders, setOrders] = useState(defaultOrders)
+  const [clients, setClients] = useState(defaultClients)
   const [cart, setCart] = usePersistentState('rb-cart-items', [])
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false)
   const [cartNotice, setCartNotice] = useState(null)
+  const [apiStatus, setApiStatus] = useState({ isLoading: true, isOnline: false, message: '' })
   const cartNoticeTimer = useRef(null)
 
   useEffect(() => {
@@ -340,6 +424,42 @@ function App() {
       if (cartNoticeTimer.current) {
         window.clearTimeout(cartNoticeTimer.current)
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadRemoteData() {
+      try {
+        const [remoteProducts, remoteSuppliers, remoteOrders, remoteClients] = await Promise.all([
+          api.listProducts(),
+          api.listSuppliers(),
+          api.listOrders(),
+          api.listClients(),
+        ])
+
+        if (!isMounted) return
+
+        setProducts(remoteProducts)
+        setSuppliers(remoteSuppliers)
+        setOrders(remoteOrders)
+        setClients(remoteClients)
+        setApiStatus({ isLoading: false, isOnline: true, message: 'API conectada ao Firebird.' })
+      } catch (error) {
+        if (!isMounted) return
+        setApiStatus({
+          isLoading: false,
+          isOnline: false,
+          message: error.message || 'API offline. Usando dados locais temporarios.',
+        })
+      }
+    }
+
+    loadRemoteData()
+
+    return () => {
+      isMounted = false
     }
   }, [])
 
@@ -400,28 +520,141 @@ function App() {
     )
   }
 
-  function updateProduct(productId, patch) {
+  async function updateProduct(productId, patch) {
+    const currentProduct = products.find((product) => product.id === productId)
+    if (!currentProduct) return
+
+    const updatedProduct = { ...currentProduct, ...patch }
     setProducts((current) =>
-      current.map((product) => (product.id === productId ? { ...product, ...patch } : product)),
+      current.map((product) => (product.id === productId ? updatedProduct : product)),
     )
+
+    if (!apiStatus.isOnline || !numericId(productId)) return
+
+    try {
+      const savedProduct = patch.sizes
+        ? await api.updateStock(productId, updatedProduct.sizes)
+        : await api.updateProduct(productId, productPayload(updatedProduct))
+      setProducts((current) => current.map((product) => (product.id === productId ? savedProduct : product)))
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+    }
   }
 
-  function addProduct(product) {
-    setProducts((current) => [product, ...current])
+  async function addProduct(product) {
+    if (!apiStatus.isOnline) {
+      setProducts((current) => [product, ...current])
+      return
+    }
+
+    try {
+      const savedProduct = await api.createProduct(productPayload(product))
+      setProducts((current) => [savedProduct, ...current])
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+      setProducts((current) => [product, ...current])
+    }
   }
 
-  function addSupplier(supplier) {
-    setSuppliers((current) => [supplier, ...current])
+  async function addSupplier(supplier) {
+    if (!apiStatus.isOnline) {
+      setSuppliers((current) => [supplier, ...current])
+      return
+    }
+
+    try {
+      const savedSupplier = await api.createSupplier(supplierPayload(supplier))
+      setSuppliers((current) => [savedSupplier, ...current])
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+      setSuppliers((current) => [supplier, ...current])
+    }
   }
 
-  function updateSupplier(supplierId, patch) {
+  async function updateSupplier(supplierId, patch) {
+    const currentSupplier = suppliers.find((supplier) => supplier.id === supplierId)
+    if (!currentSupplier) return
+
+    const updatedSupplier = { ...currentSupplier, ...patch }
     setSuppliers((current) =>
-      current.map((supplier) => (supplier.id === supplierId ? { ...supplier, ...patch } : supplier)),
+      current.map((supplier) => (supplier.id === supplierId ? updatedSupplier : supplier)),
     )
+
+    if (!apiStatus.isOnline || !numericId(supplierId)) return
+
+    try {
+      const savedSupplier = await api.updateSupplier(supplierId, supplierPayload(updatedSupplier))
+      setSuppliers((current) => current.map((supplier) => (supplier.id === supplierId ? savedSupplier : supplier)))
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+    }
   }
 
-  function updateOrder(orderId, patch) {
+  async function addClient(client) {
+    if (!apiStatus.isOnline) {
+      setClients((current) => [client, ...current])
+      return
+    }
+
+    try {
+      const savedClient = await api.createClient(clientPayload(client))
+      setClients((current) => [savedClient, ...current])
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+      setClients((current) => [client, ...current])
+    }
+  }
+
+  async function updateClient(clientId, patch) {
+    const currentClient = clients.find((client) => client.id === clientId)
+    if (!currentClient) return
+
+    const updatedClient = { ...currentClient, ...patch }
+    setClients((current) => current.map((client) => (client.id === clientId ? updatedClient : client)))
+
+    if (!apiStatus.isOnline || !numericId(clientId)) return
+
+    try {
+      const savedClient = await api.updateClient(clientId, clientPayload(updatedClient))
+      setClients((current) => current.map((client) => (client.id === clientId ? savedClient : client)))
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+    }
+  }
+
+  async function updateOrder(orderId, patch) {
     setOrders((current) => current.map((order) => (order.id === orderId ? { ...order, ...patch } : order)))
+
+    if (!apiStatus.isOnline || !patch.status) return
+
+    try {
+      const savedOrder = await api.updateOrderStatus(orderId, patch.status)
+      setOrders((current) => current.map((order) => (order.id === orderId ? savedOrder : order)))
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+    }
+  }
+
+  async function registerCartOrder() {
+    if (!apiStatus.isOnline || cartItems.length === 0) return
+
+    try {
+      const savedOrder = await api.finalizeOrder({
+        client: { name: 'Pedido WhatsApp', type: 'WhatsApp' },
+        payment: 'WhatsApp',
+        status: 'Recebido',
+        notes: 'Pedido iniciado pelo catalogo online.',
+        items: cartItems.map(({ product, quantity }) => ({
+          productId: numericId(product.id),
+          productName: product.name,
+          quantity,
+          unitPrice: Number(product.price || 0),
+        })),
+      })
+      setOrders((current) => [savedOrder, ...current.filter((order) => order.id !== savedOrder.id)])
+    } catch (error) {
+      setApiStatus((current) => ({ ...current, message: error.message }))
+    }
   }
 
   function setView(nextView) {
@@ -437,14 +670,18 @@ function App() {
   if (view === 'admin') {
     return (
       <AdminShell
+        addClient={addClient}
         addProduct={addProduct}
         addSupplier={addSupplier}
+        apiStatus={apiStatus}
+        clients={clients}
         isAuthenticated={isAdminAuthenticated}
         orders={orders}
         products={products}
         setIsAuthenticated={setIsAdminAuthenticated}
         setView={setView}
         suppliers={suppliers}
+        updateClient={updateClient}
         updateOrder={updateOrder}
         updateProduct={updateProduct}
         updateSupplier={updateSupplier}
@@ -461,6 +698,7 @@ function App() {
       cartTotal={cartTotal}
       cartNotice={cartNotice}
       dismissCartNotice={() => setCartNotice(null)}
+      registerCartOrder={registerCartOrder}
       setView={setView}
       suppliers={suppliers}
       updateCartQuantity={updateCartQuantity}
@@ -476,6 +714,7 @@ function Storefront({
   cartTotal,
   cartNotice,
   dismissCartNotice,
+  registerCartOrder,
   setView,
   suppliers,
   updateCartQuantity,
@@ -673,6 +912,7 @@ function Storefront({
         cartTotal={cartTotal}
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
+        onCheckout={registerCartOrder}
         updateCartQuantity={updateCartQuantity}
       />
 
@@ -945,7 +1185,7 @@ function Footer({ setView }) {
   )
 }
 
-function CartDrawer({ cartItems, cartTotal, isOpen, onClose, updateCartQuantity }) {
+function CartDrawer({ cartItems, cartTotal, isOpen, onCheckout, onClose, updateCartQuantity }) {
   return (
     <>
       <button
@@ -1009,6 +1249,7 @@ function CartDrawer({ cartItems, cartTotal, isOpen, onClose, updateCartQuantity 
           <a
             className={`button whatsapp ${cartItems.length === 0 ? 'is-disabled' : ''}`}
             href={cartItems.length ? checkoutLink(cartItems, cartTotal) : undefined}
+            onClick={onCheckout}
             target="_blank"
             rel="noreferrer"
           >
@@ -1022,14 +1263,18 @@ function CartDrawer({ cartItems, cartTotal, isOpen, onClose, updateCartQuantity 
 }
 
 function AdminShell({
+  addClient,
   addProduct,
   addSupplier,
+  apiStatus,
+  clients,
   isAuthenticated,
   orders,
   products,
   setIsAuthenticated,
   setView,
   suppliers,
+  updateClient,
   updateOrder,
   updateProduct,
   updateSupplier,
@@ -1071,6 +1316,9 @@ function AdminShell({
           <div>
             <p className="eyebrow">Administradores</p>
             <h1>{adminSections.find((section) => section.id === activeSection)?.label}</h1>
+            <small className={`api-status ${apiStatus.isOnline ? 'is-online' : ''}`}>
+              {apiStatus.isLoading ? 'Conectando API...' : apiStatus.message}
+            </small>
           </div>
           <div className="admin-actions">
             <button className="ghost-button" onClick={() => setView('store')} type="button">
@@ -1085,7 +1333,7 @@ function AdminShell({
         </header>
 
         {activeSection === 'overview' && (
-          <AdminOverview orders={orders} products={products} suppliers={suppliers} />
+          <AdminOverview clients={clients} orders={orders} products={products} suppliers={suppliers} />
         )}
         {activeSection === 'products' && (
           <AdminProducts
@@ -1101,6 +1349,13 @@ function AdminShell({
             addSupplier={addSupplier}
             suppliers={suppliers}
             updateSupplier={updateSupplier}
+          />
+        )}
+        {activeSection === 'clients' && (
+          <AdminClients
+            addClient={addClient}
+            clients={clients}
+            updateClient={updateClient}
           />
         )}
         {activeSection === 'orders' && <AdminOrders orders={orders} updateOrder={updateOrder} />}
@@ -1170,7 +1425,7 @@ function AdminLogin({ setIsAuthenticated, setView }) {
   )
 }
 
-function AdminOverview({ orders, products, suppliers }) {
+function AdminOverview({ clients, orders, products, suppliers }) {
   const inventoryUnits = products.reduce((total, product) => total + totalStock(product), 0)
   const inventoryCost = products.reduce((total, product) => total + totalStock(product) * product.cost, 0)
   const inventoryPotential = products.reduce((total, product) => total + totalStock(product) * product.price, 0)
@@ -1181,7 +1436,7 @@ function AdminOverview({ orders, products, suppliers }) {
     { label: 'Pecas em estoque', value: inventoryUnits, icon: Boxes, tone: 'gold' },
     { label: 'Valor de custo', value: formatCurrency(inventoryCost), icon: Warehouse, tone: 'green' },
     { label: 'Potencial de venda', value: formatCurrency(inventoryPotential), icon: TrendingUp, tone: 'lime' },
-    { label: 'Pedidos no painel', value: orders.length, icon: ClipboardList, tone: 'red' },
+    { label: 'Clientes ativos', value: clients.filter((client) => client.active !== false).length, icon: AtSign, tone: 'red' },
   ]
 
   return (
@@ -1282,7 +1537,7 @@ function AdminProducts({ addProduct, products, suppliers, updateProduct }) {
       fabric: 'Dry fit',
       colors: ['Preto'],
       sizes: { P: 0, M: 0, G: 0, GG: 0 },
-      supplierId: newProduct.supplierId,
+      supplierId: newProduct.supplierId || suppliers[0]?.id || null,
       reorderPoint: 10,
       active: true,
       launch: true,
@@ -1570,6 +1825,165 @@ function AdminSuppliers({ addSupplier, suppliers, updateSupplier }) {
               <option>Em avaliacao</option>
               <option>Pausado</option>
             </select>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function AdminClients({ addClient, clients, updateClient }) {
+  const [newClient, setNewClient] = useState({
+    name: '',
+    document: '',
+    phone: '',
+    email: '',
+    city: '',
+    uf: '',
+    type: 'Consumidor',
+  })
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    if (!newClient.name.trim()) return
+
+    addClient({
+      id: `cliente-${Date.now()}`,
+      name: newClient.name.trim(),
+      document: newClient.document,
+      phone: newClient.phone,
+      email: newClient.email,
+      city: newClient.city,
+      uf: newClient.uf,
+      type: newClient.type,
+      notes: 'Cliente cadastrado pelo painel interno.',
+      active: true,
+    })
+
+    setNewClient({
+      name: '',
+      document: '',
+      phone: '',
+      email: '',
+      city: '',
+      uf: '',
+      type: 'Consumidor',
+    })
+  }
+
+  return (
+    <section className="admin-section">
+      <form className="admin-form supplier-form" onSubmit={handleSubmit}>
+        <label>
+          Cliente
+          <input
+            onChange={(event) => setNewClient((current) => ({ ...current, name: event.target.value }))}
+            placeholder="Nome ou empresa"
+            value={newClient.name}
+          />
+        </label>
+        <label>
+          Documento
+          <input
+            onChange={(event) => setNewClient((current) => ({ ...current, document: event.target.value }))}
+            placeholder="CPF ou CNPJ"
+            value={newClient.document}
+          />
+        </label>
+        <label>
+          Telefone
+          <input
+            onChange={(event) => setNewClient((current) => ({ ...current, phone: event.target.value }))}
+            placeholder="(00) 00000-0000"
+            value={newClient.phone}
+          />
+        </label>
+        <label>
+          E-mail
+          <input
+            onChange={(event) => setNewClient((current) => ({ ...current, email: event.target.value }))}
+            placeholder="cliente@email.com"
+            value={newClient.email}
+          />
+        </label>
+        <label>
+          Cidade
+          <input
+            onChange={(event) => setNewClient((current) => ({ ...current, city: event.target.value }))}
+            placeholder="Cidade"
+            value={newClient.city}
+          />
+        </label>
+        <label>
+          UF
+          <input
+            maxLength={2}
+            onChange={(event) => setNewClient((current) => ({ ...current, uf: event.target.value }))}
+            placeholder="PB"
+            value={newClient.uf}
+          />
+        </label>
+        <label>
+          Tipo
+          <select
+            onChange={(event) => setNewClient((current) => ({ ...current, type: event.target.value }))}
+            value={newClient.type}
+          >
+            <option>Consumidor</option>
+            <option>Revenda</option>
+            <option>Academia</option>
+            <option>WhatsApp</option>
+          </select>
+        </label>
+        <button className="button primary" type="submit">
+          <Plus size={18} />
+          Adicionar
+        </button>
+      </form>
+
+      <div className="supplier-grid">
+        {clients.map((client) => (
+          <article className="supplier-card" key={client.id}>
+            <div className="supplier-top">
+              <div>
+                <strong>{client.name}</strong>
+                <small>{client.document || 'Documento nao informado'}</small>
+              </div>
+              <span>{client.type || 'Cliente'}</span>
+            </div>
+            <p>{client.notes || client.email || 'Cliente RB Dry Fit'}</p>
+            <div className="supplier-facts">
+              <span>
+                <Phone size={15} />
+                {client.phone || 'Sem telefone'}
+              </span>
+              <span>
+                <Mail size={15} />
+                {client.email || 'Sem e-mail'}
+              </span>
+              <span>
+                <MapPin size={15} />
+                {[client.city, client.uf].filter(Boolean).join(' - ') || 'Brasil'}
+              </span>
+            </div>
+            <select
+              aria-label={`Tipo de ${client.name}`}
+              onChange={(event) => updateClient(client.id, { type: event.target.value })}
+              value={client.type || 'Consumidor'}
+            >
+              <option>Consumidor</option>
+              <option>Revenda</option>
+              <option>Academia</option>
+              <option>WhatsApp</option>
+            </select>
+            <button
+              className={`status-toggle ${client.active !== false ? 'is-on' : ''}`}
+              onClick={() => updateClient(client.id, { active: client.active === false })}
+              type="button"
+            >
+              <CheckCircle2 size={16} />
+              {client.active !== false ? 'Ativo' : 'Inativo'}
+            </button>
           </article>
         ))}
       </div>
